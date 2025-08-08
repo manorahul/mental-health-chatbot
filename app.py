@@ -7,6 +7,8 @@ from dotenv import load_dotenv
 import uuid
 import re
 import random
+import socket
+
 
 # Load environment variables
 load_dotenv()
@@ -242,5 +244,14 @@ def chat():
             "session_id": session_id,
         })
 
+def find_free_port():
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.bind(('', 0))  # Bind to a free port provided by the OS
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
 if __name__ == "__main__":
-    app.run(debug=True)
+    port = find_free_port()
+    print(f"Starting server on port {port}")
+    app.run(debug=True, host="0.0.0.0", port=port)
