@@ -23,7 +23,7 @@ genai_client = genai.Client(api_key=GEMINI_API_KEY)
 app = Flask(__name__)
 
 # ✅ Set CORS to allow your React frontend; change URL to your actual React dev/prod URL
-CORS(app, origins=[*], supports_credentials=True)
+CORS(app, origins="*", supports_credentials=True)
 
 # Crisis detection regex patterns
 CRISIS_PATTERNS = [
