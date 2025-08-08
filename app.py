@@ -9,7 +9,6 @@ import re
 import random
 import socket
 
-
 # Load environment variables
 load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -22,7 +21,9 @@ genai_client = genai.Client(api_key=GEMINI_API_KEY)
 
 # Initialize Flask app
 app = Flask(__name__)
-CORS(app)  # Allow all origins — change for production security
+
+# ✅ Set CORS to allow your React frontend; change URL to your actual React dev/prod URL
+CORS(app, origins=[*], supports_credentials=True)
 
 # Crisis detection regex patterns
 CRISIS_PATTERNS = [
@@ -106,7 +107,7 @@ def chat():
     user_message = data.get("message", "").strip()
     session_id = data.get("session_id") or str(uuid.uuid4())
 
-    # Get session state
+    # Get or create session state
     session = SESSIONS.setdefault(session_id, {
         "phq9_step": 0,
         "phq9_answers": [],
@@ -244,6 +245,7 @@ def chat():
             "session_id": session_id,
         })
 
+# Function to find a free port
 def find_free_port():
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.bind(('', 0))  # Bind to a free port provided by the OS
@@ -253,5 +255,5 @@ def find_free_port():
 
 if __name__ == "__main__":
     port = find_free_port()
-    print(f"Starting server on port {port}")
+    print(f"🚀 Starting server on port {port}")
     app.run(debug=True, host="0.0.0.0", port=port)
