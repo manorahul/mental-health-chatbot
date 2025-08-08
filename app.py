@@ -1,5 +1,5 @@
-from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
+from flask import Flask, request, jsonify
+from flask_cors import CORS
 from google import genai
 from google.genai import types
 import os
@@ -18,19 +18,11 @@ if not GEMINI_API_KEY:
 # Initialize Gemini client
 genai_client = genai.Client(api_key=GEMINI_API_KEY)
 
-# Initialize FastAPI app
-app = FastAPI()
+# Initialize Flask app
+app = Flask(__name__)
+CORS(app)  # Allow all origins — change for production security
 
-# Configure CORS; restrict for production to your frontend origin
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Change "*" to your frontend URL in production e.g. "https://yourfrontend.com"
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Crisis detection regex patterns - expand as appropriate
+# Crisis detection regex patterns
 CRISIS_PATTERNS = [
     r"\bsuicid(e|al)\b",
     r"\bkill myself\b",
@@ -43,7 +35,7 @@ def detect_crisis(text: str) -> bool:
     text = text.lower()
     return any(re.search(pattern, text) for pattern in CRISIS_PATTERNS)
 
-# Greeting detection using strict word boundaries
+# Greeting detection
 def is_greeting(text: str) -> bool:
     greetings = [
         "hello",
@@ -59,7 +51,7 @@ def is_greeting(text: str) -> bool:
             return True
     return False
 
-# Motivational triggers and predefined motivational messages
+# Motivational triggers & messages
 MOTIVATIONAL_TRIGGERS = [
     "motivated",
     "need motivation",
@@ -82,7 +74,7 @@ MOTIVATIONAL_MESSAGES = [
     "You have the power to overcome things even when it feels hard.",
 ]
 
-# PHQ-9 questions in order
+# PHQ-9 questions
 PHQ9_QUESTIONS = [
     "Over the last 2 weeks, how often have you been bothered by little interest or pleasure in doing things?",
     "Over the last 2 weeks, how often have you felt down, depressed, or hopeless?",
@@ -95,7 +87,7 @@ PHQ9_QUESTIONS = [
     "Over the last 2 weeks, how often have you had thoughts that you would be better off dead or of hurting yourself in some way?",
 ]
 
-# Map user answers to PHQ-9 scores
+# PHQ-9 scoring
 SCORE_MAP = {
     "not at all": 0,
     "several days": 1,
@@ -103,16 +95,16 @@ SCORE_MAP = {
     "nearly every day": 3,
 }
 
-# In-memory session state storage (use DB in production)
+# In-memory sessions
 SESSIONS = {}
 
-@app.post("/chat")
-async def chat(request: Request):
-    data = await request.json()
+@app.route("/chat", methods=["POST"])
+def chat():
+    data = request.get_json()
     user_message = data.get("message", "").strip()
     session_id = data.get("session_id") or str(uuid.uuid4())
 
-    # Retrieve or initialize session state
+    # Get session state
     session = SESSIONS.setdefault(session_id, {
         "phq9_step": 0,
         "phq9_answers": [],
@@ -122,42 +114,42 @@ async def chat(request: Request):
 
     user_message_lower = user_message.lower()
 
-    # --- 1. Crisis detection first ---
+    # 1. Crisis detection
     if detect_crisis(user_message):
         session["escalated"] = True
-        return {
+        return jsonify({
             "reply": (
                 "I'm truly sorry you're feeling this way. Please contact a crisis helpline immediately: "
                 "[Your local helpline number]. You are not alone, and there are people who want to help you."
             ),
             "escalate": True,
             "session_id": session_id,
-        }
+        })
 
-    # --- 2. Motivational messages for specific triggers (if not screening) ---
+    # 2. Motivational triggers
     if (not session["screening_in_progress"] and
         any(trigger in user_message_lower for trigger in MOTIVATIONAL_TRIGGERS)):
         motivational_reply = random.choice(MOTIVATIONAL_MESSAGES)
-        return {
+        return jsonify({
             "reply": motivational_reply,
             "escalate": False,
             "session_id": session_id,
-        }
+        })
 
-    # --- 3. Greeting detection (when not screening) ---
+    # 3. Greeting
     if not session["screening_in_progress"] and is_greeting(user_message):
         friendly_replies = [
             "Hello! How can I support you today?",
             "Hi there! I'm here to help you with mental health support.",
             "Hey! Feel free to share how you're feeling.",
         ]
-        return {
+        return jsonify({
             "reply": random.choice(friendly_replies),
             "escalate": False,
             "session_id": session_id,
-        }
+        })
 
-    # --- 4. Start PHQ-9 screening on explicit user request ---
+    # 4. PHQ-9 start trigger
     if not session["screening_in_progress"]:
         screening_keywords = ["screen", "assessment", "test", "phq", "depression"]
         if any(kw in user_message_lower for kw in screening_keywords):
@@ -165,7 +157,7 @@ async def chat(request: Request):
             session["phq9_step"] = 0
             session["phq9_answers"] = []
             first_question = PHQ9_QUESTIONS[0]
-            return {
+            return jsonify({
                 "reply": (
                     f"Let's start the PHQ-9 depression screening.\n"
                     f"{first_question}\n"
@@ -173,9 +165,9 @@ async def chat(request: Request):
                 ),
                 "escalate": False,
                 "session_id": session_id,
-            }
+            })
         else:
-            # --- 5. General empathetic conversation with Gemini ---
+            # 5. General Gemini chat
             prompt = (
                 "You are a compassionate AI mental health assistant who provides uplifting and motivational messages. "
                 "If the user does not want screening, support them with empathetic, non-clinical, and hopeful responses. "
@@ -188,17 +180,17 @@ async def chat(request: Request):
                 config=types.GenerateContentConfig(temperature=0.7)
             )
             reply = response.text.strip()
-            return {
+            return jsonify({
                 "reply": reply,
                 "escalate": False,
                 "session_id": session_id,
-            }
+            })
 
-    # --- 6. Screening in progress: Validate answers and continue ---
+    # 6. Screening: validate answer
     answer = user_message_lower
     if answer not in SCORE_MAP:
         question = PHQ9_QUESTIONS[session["phq9_step"]]
-        return {
+        return jsonify({
             "reply": (
                 "Please answer with one of the following only:\n"
                 "Not at all, Several days, More than half the days, Nearly every day.\n\n"
@@ -206,16 +198,14 @@ async def chat(request: Request):
             ),
             "escalate": False,
             "session_id": session_id,
-        }
+        })
 
-    # Save answer and progress to next question
+    # Save answer & next question
     session["phq9_answers"].append(answer)
     session["phq9_step"] += 1
 
     if session["phq9_step"] >= len(PHQ9_QUESTIONS):
         total_score = sum(SCORE_MAP.get(ans, 0) for ans in session["phq9_answers"])
-
-        # Interpret score
         if total_score <= 4:
             severity = "minimal or no depression"
         elif total_score <= 9:
@@ -227,12 +217,12 @@ async def chat(request: Request):
         else:
             severity = "severe depression symptoms"
 
-        # Reset screening
+        # Reset
         session["screening_in_progress"] = False
         session["phq9_step"] = 0
         session["phq9_answers"] = []
 
-        return {
+        return jsonify({
             "reply": (
                 f"Thank you for completing the PHQ-9 screening. Your score is {total_score}, indicating {severity}.\n"
                 "Please remember this is not a diagnosis. If you have concerns, consider reaching out to a healthcare professional.\n"
@@ -240,14 +230,17 @@ async def chat(request: Request):
             ),
             "escalate": False,
             "session_id": session_id,
-        }
+        })
     else:
         next_question = PHQ9_QUESTIONS[session["phq9_step"]]
-        return {
+        return jsonify({
             "reply": (
                 f"{next_question}\n"
                 "Please answer with: Not at all, Several days, More than half the days, Nearly every day."
             ),
             "escalate": False,
             "session_id": session_id,
-        }
+        })
+
+if __name__ == "__main__":
+    app.run(debug=True)
